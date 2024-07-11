@@ -13,6 +13,11 @@ type Request struct {
 
 type Session	struct {
 	New  		bool 				`json:"new"`
+	User		User
+}
+
+type User struct {
+	UserID		string				
 }
 
 type SimpleUtterance struct {
@@ -21,10 +26,10 @@ type SimpleUtterance struct {
 }
 
 type Response 	struct {
-	Response 	ResponsePayLoad		`json:"response"`
+	Response 	ResponsePayload	`json:"response"`
 	Version		string				`json:"version"`
 }
 
-type ResponsePayLoad	struct {
+type ResponsePayload	struct {
 	Text 		string				`json:"text"`
 }

@@ -4,40 +4,90 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/go-resty/resty/v2"
+	"github.com/igortoigildin/alice-skill/internal/store"
+	"github.com/igortoigildin/alice-skill/internal/store/mock"
 	"github.com/stretchr/testify/assert"
+	"go.uber.org/mock/gomock"
 )
 
 func TestWebhook(t *testing.T) {
-    handler := http.HandlerFunc(webhook)
+    // создадим конроллер моков и экземпляр мок-хранилища
+    ctrl := gomock.NewController(t)
+    s := mock.NewMockStore(ctrl)
+
+    // определим, какой результат будем получать от «хранилища»
+    messages := []store.Message{
+        {
+            Sender:  "411419e5-f5be-4cdb-83aa-2ca2b6648353",
+            Time:    time.Now(),
+            Payload: "Hello!",
+        },
+    }
+
+    // установим условие: при любом вызове метода ListMessages возвращать массив messages без ошибки
+    s.EXPECT().
+        ListMessages(gomock.Any(), gomock.Any()).
+        Return(messages, nil)
+
+    // создадим экземпляр приложения и передадим ему «хранилище»
+    appInstance := newApp(s)
+
+    handler := http.HandlerFunc(appInstance.webhook)
     srv := httptest.NewServer(handler)
-    defer  srv.Close()
+    defer srv.Close()
 
     testCases := []struct {
-        name         string
+        name         string // добавим название тестов
         method       string
-        body         string
+        body         string // добавим тело запроса в табличные тесты
         expectedCode int
         expectedBody string
     }{
-        {name: "method_get", method: http.MethodGet, expectedCode: http.StatusMethodNotAllowed, expectedBody: ""},
-        {name: "method_put", method: http.MethodPut, expectedCode: http.StatusMethodNotAllowed, expectedBody: ""},
-        {name: "method_delete", method: http.MethodDelete, expectedCode: http.StatusMethodNotAllowed, expectedBody: ""},
-        {name: "method_post_without_body", method: http.MethodPost, expectedCode: http.StatusInternalServerError, expectedBody: ""},
-        {name: "method_post_unsupported_type", method: http.MethodPost, body:`{"request": {"type": "idunno", "command": "do something"}, "version": "1.0"}`, expectedCode: http.StatusUnprocessableEntity, expectedBody: ""},
         {
-            name: "method_post_success",
-            method: http.MethodPost,
-            body: `{"request": {"type": "SimpleUtterance", "command": "sudo do something"}, "session": {"new": true}, "version": "1.0"}`,
+            name:         "method_get",
+            method:       http.MethodGet,
+            expectedCode: http.StatusMethodNotAllowed,
+            expectedBody: "",
+        },
+        {
+            name:         "method_put",
+            method:       http.MethodPut,
+            expectedCode: http.StatusMethodNotAllowed,
+            expectedBody: "",
+        },
+        {
+            name:         "method_delete",
+            method:       http.MethodDelete,
+            expectedCode: http.StatusMethodNotAllowed,
+            expectedBody: "",
+        },
+        {
+            name:         "method_post_without_body",
+            method:       http.MethodPost,
+            expectedCode: http.StatusInternalServerError,
+            expectedBody: "",
+        },
+        {
+            name:         "method_post_unsupported_type",
+            method:       http.MethodPost,
+            body:         `{"request": {"type": "idunno", "command": "do something"}, "version": "1.0"}`,
+            expectedCode: http.StatusUnprocessableEntity,
+            expectedBody: "",
+        },
+        {
+            name:         "method_post_success",
+            method:       http.MethodPost,
+            body:         `{"request": {"type": "SimpleUtterance", "command": "sudo do something"}, "session": {"new": true}, "version": "1.0"}`,
             expectedCode: http.StatusOK,
-            expectedBody: `Точное время .* часов, .* минут. Для вас нет новых сообщений.`,},
+            expectedBody: `Точное время .* часов, .* минут. Для вас 1 новых сообщений.`,
+        },
     }
 
     for _, tc := range testCases {
         t.Run(tc.method, func(t *testing.T) {
-            // делаем запрос с помощью библиотеки resty к адресу запущенного сервера, 
-            // который хранится в поле URL соответствующей структуры
             req := resty.New().R()
             req.Method = tc.method
             req.URL = srv.URL
@@ -51,13 +101,9 @@ func TestWebhook(t *testing.T) {
             assert.NoError(t, err, "error making HTTP request")
 
             assert.Equal(t, tc.expectedCode, resp.StatusCode(), "Response code didn't match expected")
-
-            // проверим корректность полученного тела ответа, если мы его ожидаем
             if tc.expectedBody != "" {
-                // assert.JSONEq помогает сравнить две JSON-строки
                 assert.Regexp(t, tc.expectedBody, string(resp.Body()))
             }
         })
     }
 }
-
